@@ -1,0 +1,145 @@
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np 
+import pandas as pd
+from scipy import stats
+#https://pypi.org/project/pycountry/
+!pip install pycountry
+import pycountry
+
+from google.colab import files
+uploaded = files.upload()
+df = pd.read_csv('master.csv')
+print(df.head())
+
+df.rename(columns={"suicides/100k pop":"suicides_pop","HDI for year":"HDI_for_year",
+                  " gdp_for_year ($) ":"gdp_for_year"," gdp_per_capita ($) ":"gdp_per_capita",
+                    "gdp_per_capita ($)":"gdp_per_capita"}, inplace=True)
+print(df.columns)
+
+df["gdp_for_year"] = df["gdp_for_year"].str.replace(",","").astype(np.int64)
+df["age"] = df["age"].str.replace("5-14 years","05-14 years")
+
+df_men = df[df.sex == "male"]
+df_women = df[df.sex == "female"]
+sns.lineplot(df_men.year, df.suicides_no, ci = None)
+sns.lineplot(df_women.year, df.suicides_no, ci = None)
+plt.suptitle('Suicide Rates by Sex', fontsize=14)
+plt.legend(["male", 'female'])
+plt.show()
+
+df_age = df.groupby(["year","age"])["suicides_no", "population"].sum()
+df_new = df_age.copy().reset_index()
+plt.figure(figsize=(9,6))
+sns.lineplot("year", df_new.suicides_no*100/df_new.population, hue = "age",
+             data = df_new, linewidth = 2.5, style = "age", markers=True
+            , dashes=False)
+plt.xticks(rotation = 90)
+plt.suptitle('Suicide Rates by Age', fontsize=14)
+plt.show()
+
+df_generation = df.groupby(["year", "generation"])["suicides_no", "population"].sum()
+df_generation_new = df_generation.copy().reset_index()
+plt.figure(figsize=(9,6))
+sns.lineplot("year", df_generation_new.suicides_no*100/df_generation_new.population, hue = "generation", 
+            data = df_generation_new, linewidth = 2.5, style = "generation", markers=True
+            , dashes=False)
+plt.xticks(rotation = 90)
+plt.suptitle('Suicide by Generation', fontsize=14)
+plt.show()
+
+frame = df.groupby("country")["suicides_no"].sum()
+country_name = list(frame.index.get_level_values(0))
+#len(country_name)
+countries = {}
+for country in pycountry.countries:
+    countries[country.name] = country.alpha_3
+country_not_in_list = [i for i in country_name[:] if i not in countries.keys()]
+print(country_not_in_list)
+df.replace("Republic of Korea", "Korea, Republic of", inplace = True)
+df.replace('Czech Republic', "Czechia", inplace = True)
+df.replace('Macau', 'Macao', inplace = True)
+df.replace('Saint Vincent and Grenadines', "Saint Vincent and the Grenadines", inplace = True)
+
+df_numSuic = df.groupby(["country","year"])["suicides_no"].sum()
+df_sum = df_numSuic.sort_index(ascending=True)[:] * 100
+df_pop = df.groupby(["country","year"]).population.sum()
+df_popSum = df_pop.sort_index(ascending=False)[:]
+df_total = df_sum / df_popSum
+df_total.head(10)
+country_dict={}
+for country in df_total.index.get_level_values(0):
+    if country not in country_dict.keys():
+        country_dict[country] = df_total[country].mean()
+    else:
+        pass
+collec = list(country_dict.items())
+collec.sort(key= lambda pair:pair[1], reverse = True)
+country_list = [a[0] for a in collec]
+country_suicide = [a[1] for a in collec]
+plt.figure(figsize=(8,32))
+sns.barplot(x=country_suicide[:],y=country_list[:], palette="YlOrRd")
+plt.xlabel("ratio of suicide")
+plt.ylabel("country")
+plt.title("Suicide rate vs country", fontsize=14)
+plt.show()
+
+correl_eff = {}
+df_gdp = df.groupby(["country","year"]).gdp_per_capita.mean()
+for country in country_list[:10]:
+    slope, intercept, r_value, p_value, std_err = stats.linregress(df_gdp[country].values,df_total[country].values)
+    correl_eff[country] = float(r_value)
+    
+sns.barplot(x=list(correl_eff.keys()), y=list(correl_eff.values()), palette = "GnBu")
+plt.xticks(rotation = 90)
+plt.xlabel("Country")
+plt.ylabel("correlation coefficient")
+plt.title("Correlation between GDP and Suicide: Top 10 Countries\n", fontsize=14)
+plt.show()
+
+correl_eff = {}
+p_val_eff = {}
+for country in country_list[:]:
+    slope, intercept, r_value, p_value, std_err = stats.linregress(df_gdp[country].values, df_total[country].values)
+    correl_eff[country] = float(r_value)
+    p_val_eff[country] = float(p_value)
+
+gdp_tup = list(correl_eff.items())
+gdp_tup.sort(key= lambda pair:pair[1], reverse = False)
+dgp_relation = {a[0]:a[1] for a in gdp_tup}
+
+plt.figure(figsize=(16,10))
+sns.barplot(x=list(dgp_relation.keys()), y=list(dgp_relation.values()), palette = "coolwarm")
+plt.xticks(rotation = 90)
+plt.xlabel("Country")
+plt.ylabel("correlation coeff.")
+plt.title("Correlation between GDP and Suicide: All Countries", fontsize=14)
+plt.show()
+
+#looking at countries whose GDP per capita aren't negatively correlated with suicide rates
+pos_relation_gdp = {a:b for a,b in correl_eff.items() if b > 0.6}
+pos_relation_list = list(pos_relation_gdp.items())
+pos_relation_list.sort(key= lambda pair:pair[1], reverse = True)
+pos_relation = {a[0]:a[1] for a in pos_relation_list}
+print(len(pos_relation))
+
+ctry_list = list({a:b for a,b in pos_relation.items()})
+for country in ctry_list[:10]:
+    plt.plot(df_gdp[country].index,df_gdp[country].values, label=country, marker="o")
+plt.xlabel("year")
+plt.ylabel("gdp_per_capita")
+plt.legend()
+plt.title('GDP per capita in Outlier Countries', fontsize=14)
+plt.show()
+
+for country in ctry_list[:10]:
+    plt.plot(df_total[country].index,df_total[country].values, label=country, marker="o")
+plt.xlabel("year")
+plt.ylabel("ratio of suicide")
+plt.title('Suicide Ratios in Outlier Countries', fontsize=14)
+plt.legend()
+plt.show()
+
+without_relation = {a:b for a,b in correl_eff.items() if -0.3 < b < 0.3}
+no_relation= [i for i in country_list[:20] if i in without_relation.keys()]
+print(no_relation)
